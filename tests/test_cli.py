@@ -16,6 +16,27 @@ CLI = ROOT / "comfy-bootstrap"
 
 
 class BundledWorkflowTest(unittest.TestCase):
+    def test_krea_turbo_bf16_uses_only_connected_core_nodes(self):
+        workflow = json.loads(
+            (ROOT / "workflows/krea2-turbo-bf16.json").read_text()
+        )
+        nodes = {node["id"]: node for node in workflow["nodes"]}
+
+        self.assertEqual(len(nodes), 9)
+        self.assertEqual(len(workflow["links"]), 9)
+        self.assertEqual(
+            nodes[1]["widgets_values"],
+            ["krea2_turbo_bf16.safetensors", "default"],
+        )
+        self.assertEqual(nodes[7]["type"], "KSampler")
+        for node in nodes.values():
+            self.assertTrue(all(item["link"] is not None for item in node["inputs"]))
+        for link_id, source, source_slot, target, target_slot, _type in workflow[
+            "links"
+        ]:
+            self.assertIn(link_id, nodes[source]["outputs"][source_slot]["links"])
+            self.assertEqual(nodes[target]["inputs"][target_slot]["link"], link_id)
+
     def test_krea_workflow_has_an_editable_connected_canvas(self):
         workflow = json.loads(
             (ROOT / "workflows/krea2-text2img-turbo-bypass.json").read_text()
