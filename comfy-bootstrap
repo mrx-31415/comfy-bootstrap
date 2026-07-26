@@ -21,6 +21,7 @@ from pathlib import Path
 HF_API = os.environ.get("COMFY_BOOTSTRAP_HF_API", "https://huggingface.co/api")
 MODEL_SUFFIXES = (".bin", ".ckpt", ".gguf", ".onnx", ".pt", ".pth", ".safetensors", ".sft")
 COMFY_CLI_VERSION = "1.12.0"
+COMFY_MANAGER_VERSION = "4.2.2"
 
 
 class BootstrapError(Exception):
@@ -250,6 +251,28 @@ def setup(args, _manifest):
         "verifying ComfyUI workspace",
         cwd=comfyui,
     )
+    try:
+        command_output(
+            [str(python), "-c", "import cm_cli"],
+            "checking ComfyUI-Manager",
+        )
+    except BootstrapError:
+        requirements = comfyui / "manager_requirements.txt"
+        manager = (
+            ["-r", requirements.name]
+            if requirements.is_file()
+            else [f"comfyui_manager=={COMFY_MANAGER_VERSION}"]
+        )
+        print(f"Installing ComfyUI-Manager with {python}", flush=True)
+        run_command(
+            [str(python), "-m", "pip", "install", *manager],
+            comfyui,
+            "installing ComfyUI-Manager",
+        )
+        command_output(
+            [str(python), "-c", "import cm_cli"],
+            "verifying ComfyUI-Manager installation",
+        )
     command_output(
         [
             str(comfy),

@@ -126,6 +126,7 @@ class CLITest(unittest.TestCase):
         tools.mkdir(parents=True)
         log = self.base / "toolchain.log"
         marker = tools / ".comfy-cli-installed"
+        manager_marker = tools / ".comfy-manager-installed"
         fake_python = tools / "python"
         fake_python.write_text(
             f"""#!{sys.executable}
@@ -135,10 +136,14 @@ import sys
 
 log = pathlib.Path({str(log)!r})
 marker = pathlib.Path({str(marker)!r})
+manager_marker = pathlib.Path({str(manager_marker)!r})
 with log.open("a") as stream:
     stream.write(json.dumps(["python", *sys.argv[1:]]) + "\\n")
 if sys.argv[1:3] == ["-m", "pip"]:
-    marker.touch()
+    if any(value.startswith("comfy-cli==") for value in sys.argv):
+        marker.touch()
+    if any(value.startswith("comfyui_manager==") for value in sys.argv):
+        manager_marker.touch()
 elif sys.argv[1] == "-c" and "sys.version_info" in sys.argv[2]:
     print("3.11")
 elif sys.argv[1] == "-c" and "importlib.metadata" in sys.argv[2]:
@@ -147,6 +152,8 @@ elif sys.argv[1] == "-c" and "importlib.metadata" in sys.argv[2]:
     print("1.12.0")
 elif sys.argv[1] == "-c" and "sysconfig" in sys.argv[2]:
     print(pathlib.Path(__file__).parent)
+elif sys.argv[1] == "-c" and "import cm_cli" in sys.argv[2]:
+    raise SystemExit(0 if manager_marker.exists() else 1)
 """
         )
         fake_python.chmod(0o755)
@@ -333,6 +340,7 @@ if "deps-in-workflow" in sys.argv:
         setup = self.run_cli("setup", "--python", str(fake_python))
 
         self.assertIn("Installing comfy-cli 1.12.0", setup.stdout)
+        self.assertIn("Installing ComfyUI-Manager", setup.stdout)
         state = json.loads(
             (self.base / ".comfy-bootstrap/state.json").read_text()
         )
@@ -349,7 +357,14 @@ if "deps-in-workflow" in sys.argv:
                     if call[:3] == ["python", "-m", "pip"]
                 ]
             ),
-            1,
+            2,
+        )
+        self.assertTrue(
+            any(
+                value == "comfyui_manager==4.2.2"
+                for call in setup_calls
+                for value in call
+            )
         )
 
         self.run_cli("node", "scan", "example")

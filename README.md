@@ -46,9 +46,9 @@ If ComfyUI uses a specific interpreter, select it explicitly:
 ./comfy-bootstrap setup --python /workspace/venv/bin/python
 ```
 
-`setup` installs the pinned `comfy-cli` version, verifies the existing
-ComfyUI workspace and Manager backend, and writes executable paths to the
-gitignored `.comfy-bootstrap/state.json`. It does not install or update
+`setup` installs the pinned `comfy-cli` version and ComfyUI-Manager when
+missing, verifies the existing ComfyUI workspace, and writes executable paths
+to the gitignored `.comfy-bootstrap/state.json`. It does not install or update
 ComfyUI.
 
 Scan an imported workflow and commit the resulting dependency specification:
