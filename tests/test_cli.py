@@ -23,8 +23,17 @@ class BundledWorkflowTest(unittest.TestCase):
         nodes = {node["id"]: node for node in workflow["nodes"]}
 
         self.assertEqual(workflow["version"], 0.4)
-        self.assertEqual(len(nodes), 12)
-        self.assertEqual(len(workflow["links"]), 15)
+        self.assertEqual(len(nodes), 11)
+        self.assertEqual(len(workflow["links"]), 11)
+        self.assertEqual(nodes[265]["type"], "KSampler")
+        self.assertEqual(
+            nodes[265]["widgets_values"], [42, "randomize", 8, 1, "euler", "simple", 1]
+        )
+        self.assertNotIn(
+            "ClownsharKSampler_Beta", {node["type"] for node in nodes.values()}
+        )
+        for node in nodes.values():
+            self.assertTrue(all(item["link"] is not None for item in node["inputs"]))
         self.assertEqual(
             nodes[6]["widgets_values"],
             [
@@ -37,6 +46,16 @@ class BundledWorkflowTest(unittest.TestCase):
         ]:
             self.assertIn(link_id, nodes[source]["outputs"][source_slot]["links"])
             self.assertEqual(nodes[target]["inputs"][target_slot]["link"], link_id)
+
+        dependencies = json.loads(
+            (
+                ROOT / "workflows/krea2-text2img-turbo-bypass.nodes.json"
+            ).read_text()
+        )
+        self.assertEqual(
+            set(dependencies["custom_nodes"]),
+            {"https://github.com/RealRebelAI/ComfyUI-GGUF_KREA-2"},
+        )
 
 
 class AssetHandler(BaseHTTPRequestHandler):

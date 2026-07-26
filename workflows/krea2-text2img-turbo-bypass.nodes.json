@@ -1,10 +1,6 @@
 {
   "custom_nodes": {
-    "https://github.com/ClownsharkBatwing/RES4LYF": {
-      "state": "not-installed",
-      "hash": "-"
-    },
-    "https://github.com/city96/ComfyUI-GGUF": {
+    "https://github.com/RealRebelAI/ComfyUI-GGUF_KREA-2": {
       "state": "not-installed",
       "hash": "-"
     }

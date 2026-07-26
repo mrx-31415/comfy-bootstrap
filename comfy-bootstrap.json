@@ -14,14 +14,13 @@
       "sha256": "ac6114d7112ae2397eb26b9e6e9623aad059d346fc285ea050ffb042c7c6748e",
       "url": "https://huggingface.co/Kutches/Kr3a/resolve/main/krea2filterbypass.safetensors"
     },
-    "qwen3vl_4b_bf16": {
-      "path": "models/text_encoders/qwen3vl_4b_bf16.safetensors",
-      "url": "https://huggingface.co/Comfy-Org/Qwen3-VL/resolve/main/text_encoders/qwen3vl_4b_bf16.safetensors"
+    "qwen3vl_4b_fp8_scaled": {
+      "path": "models/text_encoders/qwen3vl_4b_fp8_scaled.safetensors",
+      "url": "https://huggingface.co/Comfy-Org/Qwen3-VL/resolve/main/text_encoders/qwen3vl_4b_fp8_scaled.safetensors"
     },
-    "wan2_1_vae_fp32": {
-      "path": "models/vae/Wan2_1_VAE_fp32.safetensors",
-      "sha256": "fd1531e31cdd20af005a9fb66e69afe4ea481a6db9b07cd889ece2e1ca2e67b9",
-      "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/Wan2_1_VAE_fp32.safetensors"
+    "qwen_image_vae": {
+      "path": "models/vae/qwen_image_vae.safetensors",
+      "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/vae/qwen_image_vae.safetensors"
     }
   },
   "workflows": {
@@ -29,8 +28,8 @@
       "assets": [
         "krea-2-base-q5_k_m",
         "krea2_turbo_lora_rank_64_bf16",
-        "qwen3vl_4b_bf16",
-        "wan2_1_vae_fp32",
+        "qwen3vl_4b_fp8_scaled",
+        "qwen_image_vae",
         "krea2filterbypass"
       ],
       "file": "workflows/krea2-text2img-turbo-bypass.json",
