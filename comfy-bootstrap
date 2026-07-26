@@ -287,15 +287,16 @@ def setup(args, _manifest):
         "verifying custom-node management",
         cwd=comfyui,
     )
-    save_state(
-        args.manifest,
+    state = load_state(args.manifest)
+    state.update(
         {
             "comfy": str(comfy),
             "comfy_cli_version": installed,
             "comfyui_dir": str(comfyui),
             "python": str(python),
-        },
+        }
     )
+    save_state(args.manifest, state)
     print(f"Setup complete for {comfyui}")
 
 
@@ -396,7 +397,59 @@ def install_nodes(args, workflow, comfyui):
     )
     if not dependencies.is_file():
         raise BootstrapError(f"node dependency file does not exist: {dependencies}")
+    fingerprint = sha256(dependencies)
+    cache_key = f"{comfyui}\n{value}"
+    state = load_state(args.manifest)
+    node_cache = state.get("node_dependencies")
+    if not isinstance(node_cache, dict):
+        node_cache = {}
+    if not args.force_nodes and node_cache.get(cache_key) == fingerprint:
+        print(f"Custom nodes already installed ({dependencies.name} unchanged)")
+        return
+
     comfy = configured_comfy(args.manifest, comfyui)
+    if not args.force_nodes:
+        try:
+            data = json.loads(dependencies.read_text())
+            custom_nodes = data.get("custom_nodes", {})
+            if not isinstance(custom_nodes, dict):
+                raise ValueError("custom_nodes must be an object")
+        except (OSError, json.JSONDecodeError, ValueError) as error:
+            raise BootstrapError(f"invalid node dependency file: {error}") from error
+
+        wanted = {
+            re.sub(
+                r"[^a-z0-9]",
+                "",
+                Path(urllib.parse.urlparse(url).path).name.removesuffix(".git").lower(),
+            )
+            for url in custom_nodes
+        }
+        installed_output = command_output(
+            [
+                str(comfy),
+                "--here",
+                "--skip-prompt",
+                "node",
+                "simple-show",
+                "installed",
+                "--mode",
+                "local",
+            ],
+            "checking installed custom nodes",
+            cwd=comfyui,
+        )
+        installed = {
+            re.sub(r"[^a-z0-9]", "", line.rsplit("@", 1)[0].lower())
+            for line in installed_output.splitlines()
+        }
+        if wanted and wanted <= installed:
+            node_cache[cache_key] = fingerprint
+            state["node_dependencies"] = node_cache
+            save_state(args.manifest, state)
+            print(f"Custom nodes already installed ({dependencies.name})")
+            return
+
     print(f"Installing custom nodes from {dependencies.name}", flush=True)
     run_command(
         [
@@ -413,6 +466,9 @@ def install_nodes(args, workflow, comfyui):
         comfyui,
         "installing custom nodes",
     )
+    node_cache[cache_key] = fingerprint
+    state["node_dependencies"] = node_cache
+    save_state(args.manifest, state)
 
 
 def add_asset(args, manifest):
@@ -1119,6 +1175,11 @@ def parser():
         "--skip-nodes",
         action="store_true",
         help="do not install the workflow's custom-node dependencies",
+    )
+    sync.add_argument(
+        "--force-nodes",
+        action="store_true",
+        help="reinstall custom-node dependencies even when previously installed",
     )
     sync.add_argument("--retries", type=int, default=3)
     sync.set_defaults(handler=sync_workflow)

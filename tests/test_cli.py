@@ -127,6 +127,7 @@ class CLITest(unittest.TestCase):
         log = self.base / "toolchain.log"
         marker = tools / ".comfy-cli-installed"
         manager_marker = tools / ".comfy-manager-installed"
+        nodes_marker = tools / ".custom-nodes-installed"
         fake_python = tools / "python"
         fake_python.write_text(
             f"""#!{sys.executable}
@@ -165,11 +166,24 @@ import pathlib
 import sys
 
 log = pathlib.Path({str(log)!r})
+nodes_marker = pathlib.Path({str(nodes_marker)!r})
 with log.open("a") as stream:
     stream.write(json.dumps(["comfy", *sys.argv[1:]]) + "\\n")
 if "deps-in-workflow" in sys.argv:
     output = pathlib.Path(sys.argv[sys.argv.index("--output") + 1])
-    output.write_text(json.dumps({{"custom_nodes": ["ComfyUI-GGUF"]}}))
+    output.write_text(json.dumps({{
+        "custom_nodes": {{
+            "https://github.com/city96/ComfyUI-GGUF": {{
+                "state": "not-installed",
+                "hash": "-"
+            }}
+        }},
+        "unknown_nodes": []
+    }}))
+elif "install-deps" in sys.argv:
+    nodes_marker.touch()
+elif "simple-show" in sys.argv and nodes_marker.exists():
+    print("ComfyUI-GGUF@2.0.0")
 """
         )
         comfy.chmod(0o755)
@@ -386,10 +400,29 @@ if "deps-in-workflow" in sys.argv:
         self.assertEqual(len(install_calls), 1)
         self.assertIn("--here", install_calls[0])
 
-        self.run_cli("sync", "example", "--skip-nodes")
+        repeated_sync = self.run_cli("sync", "example")
+        self.assertIn("already installed", repeated_sync.stdout)
         calls = [json.loads(line) for line in log.read_text().splitlines()]
         self.assertEqual(
             len([call for call in calls if "install-deps" in call]), 1
+        )
+
+        state = json.loads(
+            (self.base / ".comfy-bootstrap/state.json").read_text()
+        )
+        del state["node_dependencies"]
+        (self.base / ".comfy-bootstrap/state.json").write_text(json.dumps(state))
+        detected = self.run_cli("sync", "example")
+        self.assertIn("already installed", detected.stdout)
+        calls = [json.loads(line) for line in log.read_text().splitlines()]
+        self.assertEqual(
+            len([call for call in calls if "install-deps" in call]), 1
+        )
+
+        self.run_cli("sync", "example", "--force-nodes")
+        calls = [json.loads(line) for line in log.read_text().splitlines()]
+        self.assertEqual(
+            len([call for call in calls if "install-deps" in call]), 2
         )
 
 

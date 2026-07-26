@@ -64,6 +64,10 @@ nodes before downloading assets. Use `--skip-nodes` when nodes are managed
 separately. Interactive terminals show a progress bar with size and download
 speed; interrupted `.part` files resume automatically.
 
+Successful custom-node installs are cached by dependency-spec checksum.
+`sync` also detects nodes installed before the cache existed. Use
+`--force-nodes` to reinstall them explicitly.
+
 ## Import an existing workflow
 
 Copy a workflow from ComfyUI into the repository:
