@@ -1,0 +1,1057 @@
+#!/usr/bin/env python3
+"""Install the assets required by a ComfyUI workflow."""
+
+import argparse
+import fnmatch
+import hashlib
+import json
+import os
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+
+HF_API = os.environ.get("COMFY_BOOTSTRAP_HF_API", "https://huggingface.co/api")
+MODEL_SUFFIXES = (".bin", ".ckpt", ".gguf", ".onnx", ".pt", ".pth", ".safetensors", ".sft")
+COMFY_CLI_VERSION = "1.12.0"
+
+
+class BootstrapError(Exception):
+    pass
+
+
+def load_manifest(path):
+    if not path.exists():
+        return {"assets": {}, "workflows": {}}
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as error:
+        raise BootstrapError(f"cannot read {path}: {error}") from error
+    if not isinstance(data, dict):
+        raise BootstrapError("manifest root must be an object")
+    assets = data.get("assets", {})
+    workflows = data.get("workflows", {})
+    if not isinstance(assets, dict) or not isinstance(workflows, dict):
+        raise BootstrapError("manifest assets and workflows must be objects")
+    return {"assets": assets, "workflows": workflows}
+
+
+def save_manifest(path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + ".tmp")
+    temporary.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
+    temporary.replace(path)
+
+
+def safe_relative_path(value, label="path"):
+    path = Path(value)
+    if not value or path.is_absolute() or ".." in path.parts:
+        raise BootstrapError(f"{label} must be a safe relative path: {value!r}")
+    return path
+
+
+def confined_path(root, relative, label):
+    destination = (root / relative).resolve()
+    try:
+        destination.relative_to(root)
+    except ValueError as error:
+        raise BootstrapError(f"{label} escapes the ComfyUI directory") from error
+    return destination
+
+
+def validate_name(value):
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", value or ""):
+        raise BootstrapError(
+            "names may contain only letters, numbers, dots, dashes, and underscores"
+        )
+    return value
+
+
+def validate_sha256(value):
+    if value is None:
+        return
+    if len(value) != 64:
+        raise BootstrapError("SHA-256 must contain exactly 64 hexadecimal characters")
+    try:
+        int(value, 16)
+    except ValueError as error:
+        raise BootstrapError("SHA-256 must contain exactly 64 hexadecimal characters") from error
+
+
+def sha256(path):
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def state_path(manifest_path):
+    return manifest_path.parent / ".comfy-bootstrap" / "state.json"
+
+
+def load_state(manifest_path):
+    path = state_path(manifest_path)
+    if not path.is_file():
+        return {}
+    try:
+        value = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as error:
+        raise BootstrapError(f"cannot read local setup state: {error}") from error
+    return value if isinstance(value, dict) else {}
+
+
+def save_state(manifest_path, value):
+    save_manifest(state_path(manifest_path), value)
+
+
+def comfyui_directory(value):
+    path = Path(value).expanduser().resolve()
+    if not path.is_dir():
+        raise BootstrapError(f"ComfyUI directory does not exist: {path}")
+    return path
+
+
+def command_output(command, label, cwd=None):
+    try:
+        result = subprocess.run(command, cwd=cwd, text=True, capture_output=True)
+    except OSError as error:
+        raise BootstrapError(f"{label} failed: {error}") from error
+    if result.returncode:
+        detail = result.stderr.strip() or result.stdout.strip()
+        raise BootstrapError(f"{label} failed{': ' + detail if detail else ''}")
+    return result.stdout.strip()
+
+
+def run_command(command, cwd, label):
+    try:
+        result = subprocess.run(command, cwd=cwd)
+    except OSError as error:
+        raise BootstrapError(f"{label} failed: {error}") from error
+    if result.returncode:
+        raise BootstrapError(f"{label} failed with exit code {result.returncode}")
+
+
+def python_interpreter(explicit, comfyui):
+    if explicit:
+        path = Path(explicit).expanduser().resolve()
+        if not path.is_file():
+            raise BootstrapError(f"Python interpreter does not exist: {path}")
+        return path
+
+    candidates = []
+    configured = os.environ.get("COMFYUI_PYTHON")
+    if configured:
+        candidates.append(Path(configured))
+    for variable in ("VIRTUAL_ENV", "CONDA_PREFIX"):
+        prefix = os.environ.get(variable)
+        if prefix:
+            candidates.extend(
+                [Path(prefix) / "bin/python", Path(prefix) / "Scripts/python.exe"]
+            )
+    for directory in (comfyui / ".venv", comfyui / "venv"):
+        candidates.extend(
+            [directory / "bin/python", directory / "Scripts/python.exe"]
+        )
+    candidates.append(Path(sys.executable))
+    return next((path.resolve() for path in candidates if path.is_file()), None)
+
+
+def comfy_executable(python):
+    scripts = command_output(
+        [
+            str(python),
+            "-c",
+            "import sysconfig; print(sysconfig.get_path('scripts'))",
+        ],
+        "locating comfy-cli",
+    )
+    names = ("comfy.exe", "comfy") if os.name == "nt" else ("comfy",)
+    candidates = [Path(scripts) / name for name in names]
+    return next((path.resolve() for path in candidates if path.is_file()), None)
+
+
+def installed_comfy_cli_version(python):
+    try:
+        return command_output(
+            [
+                str(python),
+                "-c",
+                (
+                    "import importlib.metadata; "
+                    "print(importlib.metadata.version('comfy-cli'))"
+                ),
+            ],
+            "checking comfy-cli",
+        )
+    except BootstrapError:
+        return None
+
+
+def setup(args, _manifest):
+    comfyui = comfyui_directory(args.comfyui_dir)
+    if not (comfyui / "main.py").is_file():
+        raise BootstrapError(f"not a ComfyUI installation (main.py missing): {comfyui}")
+    python = python_interpreter(args.python, comfyui)
+    if python is None:
+        raise BootstrapError("cannot find ComfyUI's Python; use --python")
+    version = command_output(
+        [
+            str(python),
+            "-c",
+            "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')",
+        ],
+        "checking Python",
+    )
+    try:
+        major, minor = (int(part) for part in version.split(".", 1))
+    except ValueError as error:
+        raise BootstrapError(f"cannot determine Python version: {version}") from error
+    if (major, minor) < (3, 10):
+        raise BootstrapError("custom-node setup requires Python 3.10 or newer")
+
+    installed = installed_comfy_cli_version(python)
+    if installed != COMFY_CLI_VERSION:
+        print(
+            f"Installing comfy-cli {COMFY_CLI_VERSION} with {python}",
+            flush=True,
+        )
+        run_command(
+            [
+                str(python),
+                "-m",
+                "pip",
+                "install",
+                f"comfy-cli=={COMFY_CLI_VERSION}",
+            ],
+            comfyui,
+            "installing comfy-cli",
+        )
+        installed = installed_comfy_cli_version(python)
+        if installed != COMFY_CLI_VERSION:
+            raise BootstrapError(
+                f"expected comfy-cli {COMFY_CLI_VERSION}, found {installed or 'none'}"
+            )
+    else:
+        print(f"comfy-cli {installed} is already installed")
+
+    comfy = comfy_executable(python)
+    if comfy is None:
+        raise BootstrapError("comfy executable was not created by the installation")
+    command_output(
+        [str(comfy), "--here", "which"],
+        "verifying ComfyUI workspace",
+        cwd=comfyui,
+    )
+    command_output(
+        [
+            str(comfy),
+            "--here",
+            "--skip-prompt",
+            "node",
+            "simple-show",
+            "installed",
+            "--mode",
+            "local",
+        ],
+        "verifying custom-node management",
+        cwd=comfyui,
+    )
+    save_state(
+        args.manifest,
+        {
+            "comfy": str(comfy),
+            "comfy_cli_version": installed,
+            "comfyui_dir": str(comfyui),
+            "python": str(python),
+        },
+    )
+    print(f"Setup complete for {comfyui}")
+
+
+def configured_comfy(manifest_path, comfyui):
+    state = load_state(manifest_path)
+    configured = state.get("comfy")
+    if (
+        state.get("comfyui_dir") == str(comfyui)
+        and state.get("comfy_cli_version") == COMFY_CLI_VERSION
+        and isinstance(configured, str)
+        and Path(configured).is_file()
+    ):
+        return Path(configured)
+    override = os.environ.get("COMFY_CLI")
+    if override and Path(override).expanduser().is_file():
+        return Path(override).expanduser().resolve()
+    on_path = shutil.which("comfy")
+    if on_path:
+        return Path(on_path).resolve()
+    raise BootstrapError("comfy-cli is not configured; run comfy-bootstrap setup")
+
+
+def workflow_source(manifest_path, workflow):
+    value = workflow.get("file")
+    if not value:
+        raise BootstrapError("workflow has no file")
+    source = manifest_path.parent / safe_relative_path(value, "workflow file")
+    if not source.is_file():
+        raise BootstrapError(f"workflow file does not exist: {source}")
+    return source
+
+
+def node_scan(args, manifest):
+    workflow = manifest["workflows"].get(args.workflow)
+    if workflow is None:
+        raise BootstrapError(f"unknown workflow: {args.workflow}")
+    comfyui = comfyui_directory(args.comfyui_dir)
+    comfy = configured_comfy(args.manifest, comfyui)
+    source = workflow_source(args.manifest, workflow)
+    output = source.with_name(source.stem + ".nodes.json")
+    temporary = output.with_name(output.stem + ".tmp.json")
+    try:
+        run_command(
+            [
+                str(comfy),
+                "--here",
+                "--skip-prompt",
+                "node",
+                "deps-in-workflow",
+                "--workflow",
+                str(source),
+                "--output",
+                str(temporary),
+                "--mode",
+                "remote",
+            ],
+            comfyui,
+            "scanning workflow nodes",
+        )
+        json.loads(temporary.read_text())
+    except (OSError, json.JSONDecodeError) as error:
+        temporary.unlink(missing_ok=True)
+        raise BootstrapError(f"invalid node dependency output: {error}") from error
+    except BootstrapError:
+        temporary.unlink(missing_ok=True)
+        raise
+    temporary.replace(output)
+    workflow["node_dependencies"] = output.relative_to(
+        args.manifest.parent
+    ).as_posix()
+    save_manifest(args.manifest, manifest)
+    print(f"Saved node dependencies -> {workflow['node_dependencies']}")
+
+
+def node_show(args, manifest):
+    workflow = manifest["workflows"].get(args.workflow)
+    if workflow is None:
+        raise BootstrapError(f"unknown workflow: {args.workflow}")
+    value = workflow.get("node_dependencies")
+    if not value:
+        raise BootstrapError(f"workflow has no node dependency scan: {args.workflow}")
+    path = args.manifest.parent / safe_relative_path(
+        value, "node dependency file"
+    )
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as error:
+        raise BootstrapError(f"cannot read node dependencies: {error}") from error
+    print(json.dumps(data, indent=2, sort_keys=True))
+
+
+def install_nodes(args, workflow, comfyui):
+    value = workflow.get("node_dependencies")
+    if not value or args.skip_nodes:
+        return
+    dependencies = args.manifest.parent / safe_relative_path(
+        value, "node dependency file"
+    )
+    if not dependencies.is_file():
+        raise BootstrapError(f"node dependency file does not exist: {dependencies}")
+    comfy = configured_comfy(args.manifest, comfyui)
+    print(f"Installing custom nodes from {dependencies.name}", flush=True)
+    run_command(
+        [
+            str(comfy),
+            "--here",
+            "--skip-prompt",
+            "node",
+            "install-deps",
+            "--deps",
+            str(dependencies),
+            "--mode",
+            "remote",
+        ],
+        comfyui,
+        "installing custom nodes",
+    )
+
+
+def add_asset(args, manifest):
+    name = validate_name(args.name)
+    safe_relative_path(args.path, "asset path")
+    validate_sha256(args.sha256)
+    if name in manifest["assets"] and not args.replace:
+        raise BootstrapError(f"asset already exists: {name} (use --replace)")
+    asset = {"path": args.path, "url": args.url}
+    if args.sha256:
+        asset["sha256"] = args.sha256.lower()
+    if args.token_env:
+        asset["token_env"] = args.token_env
+    manifest["assets"][name] = asset
+    save_manifest(args.manifest, manifest)
+    print(f"Added asset {name}")
+
+
+def validate_hf_repo(value):
+    repo = value.strip("/")
+    if repo.count("/") != 1 or any(part in ("", ".", "..") for part in repo.split("/")):
+        raise BootstrapError("Hugging Face repository must be OWNER/NAME")
+    return repo
+
+
+def add_hf_asset(args, manifest):
+    if args.workflow not in manifest["workflows"]:
+        raise BootstrapError(f"unknown workflow: {args.workflow}")
+    repo = validate_hf_repo(args.repo)
+    source_file = safe_relative_path(args.file, "Hugging Face file").as_posix()
+    destination_name = args.filename or Path(source_file).name
+    if Path(destination_name).name != destination_name:
+        raise BootstrapError("--filename must be a filename, not a path")
+    destination = (
+        Path("models")
+        / safe_relative_path(args.to, "ComfyUI model directory")
+        / destination_name
+    ).as_posix()
+    validate_sha256(args.sha256)
+
+    url = (
+        f"https://huggingface.co/{urllib.parse.quote(repo, safe='/')}/resolve/"
+        f"{urllib.parse.quote(args.revision, safe='')}/"
+        f"{urllib.parse.quote(source_file, safe='/')}"
+    )
+    exact_match = next(
+        (
+            name
+            for name, asset in manifest["assets"].items()
+            if isinstance(asset, dict)
+            and asset.get("url") == url
+            and asset.get("path") == destination
+        ),
+        None,
+    )
+    inferred_name = re.sub(
+        r"[^a-z0-9._-]+", "-", Path(destination_name).stem.lower()
+    ).strip(".-")
+    name = validate_name(args.name or exact_match or inferred_name or "model")
+    if args.name is None and exact_match is None:
+        base = name
+        suffix = 2
+        while name in manifest["assets"]:
+            name = f"{base}-{suffix}"
+            suffix += 1
+    if name in manifest["assets"] and name != exact_match and not args.replace:
+        raise BootstrapError(f"asset already exists: {name} (use --name or --replace)")
+
+    current = manifest["assets"].get(name)
+    asset = dict(current) if isinstance(current, dict) else {}
+    asset.update({"path": destination, "url": url})
+    if args.sha256:
+        asset["sha256"] = args.sha256.lower()
+    if args.token_env:
+        asset["token_env"] = args.token_env
+    manifest["assets"][name] = asset
+    links = manifest["workflows"][args.workflow].setdefault("assets", [])
+    if name not in links:
+        links.append(name)
+    save_manifest(args.manifest, manifest)
+    print(f"{'Reused' if exact_match == name else 'Added'} asset {name}")
+    print(f"Linked {name} to {args.workflow}")
+
+
+def remove_asset(args, manifest):
+    name = args.name
+    if name not in manifest["assets"]:
+        raise BootstrapError(f"unknown asset: {name}")
+    users = [
+        workflow_name
+        for workflow_name, workflow in manifest["workflows"].items()
+        if name in workflow.get("assets", [])
+    ]
+    if users and not args.force:
+        raise BootstrapError(
+            f"asset is linked to {', '.join(users)} (use --force to unlink it)"
+        )
+    for workflow in manifest["workflows"].values():
+        workflow["assets"] = [
+            asset_name for asset_name in workflow.get("assets", []) if asset_name != name
+        ]
+    del manifest["assets"][name]
+    save_manifest(args.manifest, manifest)
+    print(f"Removed asset {name}")
+
+
+def add_workflow(args, manifest):
+    name = validate_name(args.name)
+    source = Path(args.file).resolve()
+    base = args.manifest.parent.resolve()
+    try:
+        stored_path = source.relative_to(base)
+    except ValueError as error:
+        raise BootstrapError("workflow file must be inside the manifest directory") from error
+    if not source.is_file():
+        raise BootstrapError(f"workflow file does not exist: {args.file}")
+    try:
+        json.loads(source.read_text())
+    except (OSError, json.JSONDecodeError) as error:
+        raise BootstrapError(f"workflow file is not valid JSON: {error}") from error
+    if name in manifest["workflows"] and not args.replace:
+        raise BootstrapError(f"workflow already exists: {name} (use --replace)")
+    existing_assets = manifest["workflows"].get(name, {}).get("assets", [])
+    manifest["workflows"][name] = {
+        "assets": existing_assets if args.replace else [],
+        "file": stored_path.as_posix(),
+    }
+    save_manifest(args.manifest, manifest)
+    print(f"Added workflow {name}")
+
+
+def nested_strings(value):
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, list):
+        for item in value:
+            yield from nested_strings(item)
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from nested_strings(item)
+
+
+def imported_asset_name(workflow_name, filename, assets):
+    stem = Path(filename).stem.lower()
+    stem = re.sub(r"[^a-z0-9._-]+", "-", stem).strip(".-") or "model"
+    base = f"{workflow_name}-{stem}"
+    candidate = base
+    suffix = 2
+    while candidate in assets:
+        candidate = f"{base}-{suffix}"
+        suffix += 1
+    return candidate
+
+
+def import_workflow(args, manifest):
+    name = validate_name(args.name)
+    source = Path(args.file).expanduser().resolve()
+    if not source.is_file():
+        raise BootstrapError(f"workflow file does not exist: {args.file}")
+    try:
+        text = source.read_text()
+        workflow_data = json.loads(text)
+    except (OSError, json.JSONDecodeError) as error:
+        raise BootstrapError(f"workflow file is not valid JSON: {error}") from error
+    if name in manifest["workflows"] and not args.replace:
+        raise BootstrapError(f"workflow already exists: {name} (use --replace)")
+
+    destination = args.manifest.parent / "workflows" / f"{name}.json"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if source != destination.resolve():
+        temporary = destination.with_name(destination.name + ".tmp")
+        temporary.write_text(text)
+        temporary.replace(destination)
+
+    existing_links = manifest["workflows"].get(name, {}).get("assets", [])
+    links = list(existing_links)
+    embedded_names = set()
+    added = []
+    nodes = workflow_data.get("nodes", []) if isinstance(workflow_data, dict) else []
+    for node in nodes if isinstance(nodes, list) else []:
+        if not isinstance(node, dict):
+            continue
+        properties = node.get("properties", {})
+        models = properties.get("models", []) if isinstance(properties, dict) else []
+        for model in models if isinstance(models, list) else []:
+            if not isinstance(model, dict):
+                continue
+            filename = model.get("name")
+            url = model.get("url")
+            directory = model.get("directory")
+            if not all(isinstance(value, str) and value for value in (filename, url, directory)):
+                continue
+            if urllib.parse.urlparse(url).scheme not in ("http", "https"):
+                continue
+            try:
+                relative = safe_relative_path(
+                    Path("models") / directory / filename, "embedded model path"
+                ).as_posix()
+            except (BootstrapError, TypeError):
+                continue
+            embedded_names.add(Path(filename).name)
+            asset = {"path": relative, "url": url}
+            asset_name = next(
+                (
+                    current_name
+                    for current_name, current in manifest["assets"].items()
+                    if isinstance(current, dict)
+                    and current.get("url") == url
+                    and current.get("path") == relative
+                ),
+                None,
+            )
+            if asset_name is None:
+                asset_name = imported_asset_name(name, filename, manifest["assets"])
+                manifest["assets"][asset_name] = asset
+                added.append(asset_name)
+            if asset_name not in links:
+                links.append(asset_name)
+
+    manifest["workflows"][name] = {
+        "assets": links,
+        "file": destination.relative_to(args.manifest.parent).as_posix(),
+    }
+    save_manifest(args.manifest, manifest)
+
+    candidates = {
+        Path(value).name
+        for value in nested_strings(workflow_data)
+        if "://" not in value and value.lower().endswith(MODEL_SUFFIXES)
+    }
+    unresolved = sorted(candidates - embedded_names)
+    print(f"Imported workflow {name}")
+    print(f"Added {len(added)} embedded asset(s)")
+    if unresolved:
+        print("Unresolved model references:")
+        for filename in unresolved:
+            print(f"  {filename}")
+
+
+def remove_workflow(args, manifest):
+    if args.name not in manifest["workflows"]:
+        raise BootstrapError(f"unknown workflow: {args.name}")
+    del manifest["workflows"][args.name]
+    save_manifest(args.manifest, manifest)
+    print(f"Removed workflow {args.name}")
+
+
+def change_links(args, manifest, link):
+    if args.workflow not in manifest["workflows"]:
+        raise BootstrapError(f"unknown workflow: {args.workflow}")
+    unknown = [name for name in args.assets if name not in manifest["assets"]]
+    if unknown:
+        raise BootstrapError(f"unknown asset(s): {', '.join(unknown)}")
+    current = manifest["workflows"][args.workflow].setdefault("assets", [])
+    if link:
+        current.extend(name for name in args.assets if name not in current)
+        action = "Linked"
+    else:
+        current[:] = [name for name in current if name not in args.assets]
+        action = "Unlinked"
+    save_manifest(args.manifest, manifest)
+    print(f"{action} {', '.join(args.assets)} {'to' if link else 'from'} {args.workflow}")
+
+
+def show_manifest(args, manifest):
+    if args.name is None:
+        print(json.dumps(manifest, indent=2, sort_keys=True))
+        return
+    if args.name in manifest["workflows"]:
+        value = manifest["workflows"][args.name]
+    elif args.name in manifest["assets"]:
+        value = manifest["assets"][args.name]
+    else:
+        raise BootstrapError(f"unknown asset or workflow: {args.name}")
+    print(json.dumps(value, indent=2, sort_keys=True))
+
+
+def list_manifest(_args, manifest):
+    print("Workflows:")
+    for name, workflow in sorted(manifest["workflows"].items()):
+        print(f"  {name} ({len(workflow.get('assets', []))} assets)")
+    print("Assets:")
+    for name, asset in sorted(manifest["assets"].items()):
+        print(f"  {name} -> {asset.get('path', '?')}")
+
+
+def hf_request(path, query=None):
+    url = f"{HF_API}/{path}"
+    if query:
+        url += "?" + urllib.parse.urlencode(query)
+    headers = {"User-Agent": "comfy-bootstrap/1"}
+    if os.environ.get("HF_TOKEN"):
+        headers["Authorization"] = f"Bearer {os.environ['HF_TOKEN']}"
+    try:
+        with urllib.request.urlopen(
+            urllib.request.Request(url, headers=headers), timeout=30
+        ) as response:
+            return json.load(response)
+    except (OSError, urllib.error.URLError, json.JSONDecodeError) as error:
+        raise BootstrapError(f"Hugging Face request failed: {error}") from error
+
+
+def hf_model_files(repo, pattern="*"):
+    details = hf_request(f"models/{urllib.parse.quote(repo, safe='/')}")
+    siblings = details.get("siblings", []) if isinstance(details, dict) else []
+    return sorted(
+        item["rfilename"]
+        for item in siblings
+        if isinstance(item, dict)
+        and isinstance(item.get("rfilename"), str)
+        and fnmatch.fnmatch(item["rfilename"], pattern)
+    )
+
+
+def choose(items, prompt):
+    while True:
+        try:
+            answer = input(prompt).strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\nCancelled")
+            return None
+        if not answer:
+            print("Cancelled")
+            return None
+        if answer.isdigit() and 1 <= int(answer) <= len(items):
+            return items[int(answer) - 1]
+        print(f"Enter a number from 1 to {len(items)}, or press Enter to cancel.")
+
+
+def hf_search(args, manifest):
+    if args.add:
+        if not args.workflow or not args.to:
+            raise BootstrapError("--add requires --workflow and --to")
+        if args.workflow not in manifest["workflows"]:
+            raise BootstrapError(f"unknown workflow: {args.workflow}")
+    results = hf_request(
+        "models",
+        {
+            "search": args.query,
+            "sort": "downloads",
+            "direction": -1,
+            "limit": args.limit,
+        },
+    )
+    if not isinstance(results, list):
+        raise BootstrapError("unexpected Hugging Face search response")
+    if not results:
+        print("No repositories found")
+        return
+    models = [
+        model for model in results if isinstance(model, dict) and model.get("id")
+    ]
+    for index, model in enumerate(models, 1):
+        print(
+            f"[{index}] {model['id']}\t"
+            f"downloads={model.get('downloads', 0)}\tlikes={model.get('likes', 0)}"
+        )
+        if not args.add:
+            print(
+                "    inspect: ./comfy-bootstrap hf files "
+                f"{shlex.quote(model['id'])} '*.safetensors'"
+            )
+    if not args.add or not models:
+        return
+
+    selected_model = choose(models, "Select repository: ")
+    if selected_model is None:
+        return
+    repo = selected_model["id"]
+    files = [
+        filename
+        for filename in hf_model_files(repo, args.pattern)
+        if filename.lower().endswith(MODEL_SUFFIXES)
+    ]
+    if not files:
+        print("No matching model files found")
+        return
+    for index, filename in enumerate(files, 1):
+        print(f"[{index}] {filename}")
+    selected_file = choose(files, "Select file: ")
+    if selected_file is None:
+        return
+    add_hf_asset(
+        argparse.Namespace(
+            file=selected_file,
+            filename=None,
+            manifest=args.manifest,
+            name=None,
+            repo=repo,
+            replace=False,
+            revision="main",
+            sha256=None,
+            to=args.to,
+            token_env=args.token_env,
+            workflow=args.workflow,
+        ),
+        manifest,
+    )
+
+
+def hf_files(args, _manifest):
+    repo = validate_hf_repo(args.repo)
+    files = hf_model_files(repo, args.pattern)
+    if not files:
+        print("No matching files found")
+        return
+    for filename in files:
+        print(filename)
+
+
+def download(asset, destination, retries):
+    expected = asset.get("sha256")
+    validate_sha256(expected)
+    if destination.is_file():
+        if expected is None or sha256(destination) == expected.lower():
+            return "skipped"
+
+    token = None
+    token_env = asset.get("token_env")
+    if token_env:
+        token = os.environ.get(token_env)
+        if not token:
+            raise BootstrapError(f"required environment variable is not set: {token_env}")
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    partial = destination.with_name(destination.name + ".part")
+    last_error = None
+    for attempt in range(retries):
+        offset = partial.stat().st_size if partial.exists() else 0
+        headers = {"User-Agent": "comfy-bootstrap/1"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        if offset:
+            headers["Range"] = f"bytes={offset}-"
+        request = urllib.request.Request(asset["url"], headers=headers)
+        try:
+            with urllib.request.urlopen(request, timeout=60) as response:
+                append = offset > 0 and response.status == 206
+                with partial.open("ab" if append else "wb") as output:
+                    shutil.copyfileobj(response, output, length=1024 * 1024)
+            if expected and sha256(partial) != expected.lower():
+                partial.unlink(missing_ok=True)
+                raise BootstrapError(f"checksum mismatch for {destination.name}")
+            partial.replace(destination)
+            return "downloaded"
+        except BootstrapError:
+            raise
+        except (OSError, urllib.error.URLError) as error:
+            last_error = error
+            if attempt + 1 < retries:
+                time.sleep(2**attempt)
+    raise BootstrapError(f"download failed after {retries} attempts: {last_error}")
+
+
+def sync_workflow(args, manifest):
+    workflow = manifest["workflows"].get(args.workflow)
+    if workflow is None:
+        raise BootstrapError(f"unknown workflow: {args.workflow}")
+    comfyui = comfyui_directory(args.comfyui_dir)
+
+    asset_names = workflow.get("assets", [])
+    missing = [name for name in asset_names if name not in manifest["assets"]]
+    if missing:
+        raise BootstrapError(f"workflow references unknown asset(s): {', '.join(missing)}")
+
+    source = workflow_source(args.manifest, workflow)
+    install_nodes(args, workflow, comfyui)
+
+    results = {"downloaded": 0, "skipped": 0}
+    failures = []
+    for name in asset_names:
+        asset = manifest["assets"][name]
+        if not isinstance(asset, dict) or "url" not in asset or "path" not in asset:
+            failures.append(f"{name}: asset requires url and path")
+            continue
+        try:
+            relative = safe_relative_path(asset["path"], f"asset {name} path")
+            destination = confined_path(comfyui, relative, f"asset {name} path")
+            result = download(asset, destination, args.retries)
+            results[result] += 1
+            print(f"{result.capitalize():10} {name} -> {relative}")
+        except (BootstrapError, KeyError, TypeError) as error:
+            failures.append(f"{name}: {error}")
+            print(f"Failed     {name}: {error}", file=sys.stderr)
+
+    if failures:
+        raise BootstrapError(
+            f"{len(failures)} asset(s) failed; workflow was not installed"
+        )
+
+    target_dir = confined_path(
+        comfyui,
+        safe_relative_path(args.workflow_dir, "workflow directory"),
+        "workflow directory",
+    )
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target = target_dir / source.name
+    temporary = target.with_name(target.name + ".tmp")
+    shutil.copyfile(source, temporary)
+    temporary.replace(target)
+    print(f"Installed  workflow -> {target.relative_to(comfyui)}")
+    print(
+        f"Done: {results['downloaded']} downloaded, "
+        f"{results['skipped']} already present"
+    )
+
+
+def parser():
+    root = argparse.ArgumentParser(
+        prog="comfy-bootstrap",
+        description="Install a ComfyUI workflow and its dependencies.",
+    )
+    root.add_argument(
+        "--manifest",
+        type=Path,
+        default=Path(__file__).resolve().parent / "comfy-bootstrap.json",
+        help="manifest path (default: beside this script)",
+    )
+    commands = root.add_subparsers(dest="command", required=True)
+
+    setup_command = commands.add_parser(
+        "setup", help="install and verify optional custom-node tooling"
+    )
+    setup_command.add_argument(
+        "--comfyui-dir",
+        default=os.environ.get("COMFYUI_DIR"),
+        required="COMFYUI_DIR" not in os.environ,
+    )
+    setup_command.add_argument("--python")
+    setup_command.set_defaults(handler=setup)
+
+    asset = commands.add_parser("asset", help="manage assets")
+    asset_commands = asset.add_subparsers(dest="asset_command", required=True)
+    asset_add = asset_commands.add_parser("add")
+    asset_add.add_argument("name")
+    asset_add.add_argument("url")
+    asset_add.add_argument("path")
+    asset_add.add_argument("--sha256")
+    asset_add.add_argument("--token-env")
+    asset_add.add_argument("--replace", action="store_true")
+    asset_add.set_defaults(handler=add_asset)
+    asset_remove = asset_commands.add_parser("remove")
+    asset_remove.add_argument("name")
+    asset_remove.add_argument("--force", action="store_true")
+    asset_remove.set_defaults(handler=remove_asset)
+
+    workflow = commands.add_parser("workflow", help="manage workflows")
+    workflow_commands = workflow.add_subparsers(
+        dest="workflow_command", required=True
+    )
+    workflow_add = workflow_commands.add_parser("add")
+    workflow_add.add_argument("name")
+    workflow_add.add_argument("file")
+    workflow_add.add_argument("--replace", action="store_true")
+    workflow_add.set_defaults(handler=add_workflow)
+    workflow_import = workflow_commands.add_parser(
+        "import", help="copy a workflow and extract embedded model links"
+    )
+    workflow_import.add_argument("name")
+    workflow_import.add_argument("file")
+    workflow_import.add_argument("--replace", action="store_true")
+    workflow_import.set_defaults(handler=import_workflow)
+    workflow_remove = workflow_commands.add_parser("remove")
+    workflow_remove.add_argument("name")
+    workflow_remove.set_defaults(handler=remove_workflow)
+    for command, should_link in (("link", True), ("unlink", False)):
+        link_parser = workflow_commands.add_parser(command)
+        link_parser.add_argument("workflow")
+        link_parser.add_argument("assets", nargs="+")
+        link_parser.set_defaults(
+            handler=lambda args, manifest, value=should_link: change_links(
+                args, manifest, value
+            )
+        )
+
+    hf = commands.add_parser("hf", help="search Hugging Face")
+    hf_commands = hf.add_subparsers(dest="hf_command", required=True)
+    hf_search_parser = hf_commands.add_parser("search")
+    hf_search_parser.add_argument("query")
+    hf_search_parser.add_argument("--limit", type=int, default=10)
+    hf_search_parser.add_argument(
+        "--add", action="store_true", help="choose and add a search result"
+    )
+    hf_search_parser.add_argument("--workflow")
+    hf_search_parser.add_argument("--to")
+    hf_search_parser.add_argument("--pattern", default="*")
+    hf_search_parser.add_argument("--token-env")
+    hf_search_parser.set_defaults(handler=hf_search)
+    hf_files_parser = hf_commands.add_parser("files")
+    hf_files_parser.add_argument("repo")
+    hf_files_parser.add_argument("pattern", nargs="?", default="*")
+    hf_files_parser.set_defaults(handler=hf_files)
+    hf_add_parser = hf_commands.add_parser(
+        "add", help="add and link a Hugging Face file"
+    )
+    hf_add_parser.add_argument("repo")
+    hf_add_parser.add_argument("file")
+    hf_add_parser.add_argument("--to", required=True)
+    hf_add_parser.add_argument("--workflow", required=True)
+    hf_add_parser.add_argument("--name")
+    hf_add_parser.add_argument("--filename")
+    hf_add_parser.add_argument("--revision", default="main")
+    hf_add_parser.add_argument("--sha256")
+    hf_add_parser.add_argument("--token-env")
+    hf_add_parser.add_argument("--replace", action="store_true")
+    hf_add_parser.set_defaults(handler=add_hf_asset)
+
+    node = commands.add_parser("node", help="manage workflow node dependencies")
+    node_commands = node.add_subparsers(dest="node_command", required=True)
+    node_scan_parser = node_commands.add_parser("scan")
+    node_scan_parser.add_argument("workflow")
+    node_scan_parser.add_argument(
+        "--comfyui-dir",
+        default=os.environ.get("COMFYUI_DIR"),
+        required="COMFYUI_DIR" not in os.environ,
+    )
+    node_scan_parser.set_defaults(handler=node_scan)
+    node_show_parser = node_commands.add_parser("show")
+    node_show_parser.add_argument("workflow")
+    node_show_parser.set_defaults(handler=node_show)
+
+    list_command = commands.add_parser("list", help="list configured items")
+    list_command.set_defaults(handler=list_manifest)
+    show = commands.add_parser("show", help="show manifest data")
+    show.add_argument("name", nargs="?")
+    show.set_defaults(handler=show_manifest)
+
+    sync = commands.add_parser("sync", help="download and install a workflow")
+    sync.add_argument("workflow")
+    sync.add_argument(
+        "--comfyui-dir",
+        default=os.environ.get("COMFYUI_DIR"),
+        required="COMFYUI_DIR" not in os.environ,
+    )
+    sync.add_argument(
+        "--workflow-dir", default="user/default/workflows"
+    )
+    sync.add_argument(
+        "--skip-nodes",
+        action="store_true",
+        help="do not install the workflow's custom-node dependencies",
+    )
+    sync.add_argument("--retries", type=int, default=3)
+    sync.set_defaults(handler=sync_workflow)
+    return root
+
+
+def main():
+    args = parser().parse_args()
+    args.manifest = args.manifest.expanduser().resolve()
+    try:
+        if getattr(args, "retries", 1) < 1:
+            raise BootstrapError("--retries must be at least 1")
+        if getattr(args, "limit", 1) < 1:
+            raise BootstrapError("--limit must be at least 1")
+        manifest = load_manifest(args.manifest)
+        args.handler(args, manifest)
+    except BootstrapError as error:
+        print(f"Error: {error}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

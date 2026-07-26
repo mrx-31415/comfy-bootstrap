@@ -1,0 +1,13 @@
+{
+  "custom_nodes": {
+    "https://github.com/ClownsharkBatwing/RES4LYF": {
+      "state": "not-installed",
+      "hash": "-"
+    },
+    "https://github.com/city96/ComfyUI-GGUF": {
+      "state": "not-installed",
+      "hash": "-"
+    }
+  },
+  "unknown_nodes": []
+}
