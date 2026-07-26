@@ -61,7 +61,8 @@ git add workflows/my-flow.nodes.json comfy-bootstrap.json
 
 Once a workflow has a node dependency specification, `sync` installs those
 nodes before downloading assets. Use `--skip-nodes` when nodes are managed
-separately.
+separately. Interactive terminals show a progress bar with size and download
+speed; interrupted `.part` files resume automatically.
 
 ## Import an existing workflow
 

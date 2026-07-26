@@ -823,7 +823,31 @@ def hf_files(args, _manifest):
         print(filename)
 
 
-def download(asset, destination, retries):
+def human_size(value):
+    size = float(value)
+    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
+        if size < 1024 or unit == "TiB":
+            return f"{size:.1f} {unit}"
+        size /= 1024
+
+
+def show_progress(label, current, total, speed):
+    if total:
+        fraction = min(current / total, 1)
+        filled = round(24 * fraction)
+        bar = f"[{'#' * filled}{'-' * (24 - filled)}] {fraction:6.1%}"
+        amount = f"{human_size(current)} / {human_size(total)}"
+    else:
+        bar = "[downloading]"
+        amount = human_size(current)
+    print(
+        f"\r{label}: {bar}  {amount}  {human_size(speed)}/s",
+        end="",
+        flush=True,
+    )
+
+
+def download(asset, destination, retries, label):
     expected = asset.get("sha256")
     validate_sha256(expected)
     if destination.is_file():
@@ -842,6 +866,9 @@ def download(asset, destination, retries):
     last_error = None
     for attempt in range(retries):
         offset = partial.stat().st_size if partial.exists() else 0
+        if attempt == 0:
+            action = f"Resuming from {human_size(offset)}" if offset else "Downloading"
+            print(f"{action} {label}", flush=True)
         headers = {"User-Agent": "comfy-bootstrap/1"}
         if token:
             headers["Authorization"] = f"Bearer {token}"
@@ -851,16 +878,54 @@ def download(asset, destination, retries):
         try:
             with urllib.request.urlopen(request, timeout=60) as response:
                 append = offset > 0 and response.status == 206
+                if not append:
+                    offset = 0
+                content_range = response.headers.get("Content-Range", "")
+                match = re.search(r"/(\d+)$", content_range)
+                length = response.headers.get("Content-Length")
+                try:
+                    total = int(match.group(1)) if match else (
+                        offset + int(length) if length else None
+                    )
+                except ValueError:
+                    total = None
+                started = time.monotonic()
+                updated = 0
+                current = offset
                 with partial.open("ab" if append else "wb") as output:
-                    shutil.copyfileobj(response, output, length=1024 * 1024)
-            if expected and sha256(partial) != expected.lower():
-                partial.unlink(missing_ok=True)
-                raise BootstrapError(f"checksum mismatch for {destination.name}")
+                    while chunk := response.read(1024 * 1024):
+                        output.write(chunk)
+                        current += len(chunk)
+                        now = time.monotonic()
+                        if sys.stdout.isatty() and now - updated >= 0.2:
+                            show_progress(
+                                label,
+                                current,
+                                total,
+                                (current - offset) / max(now - started, 0.001),
+                            )
+                            updated = now
+                if sys.stdout.isatty():
+                    now = time.monotonic()
+                    show_progress(
+                        label,
+                        current,
+                        total,
+                        (current - offset) / max(now - started, 0.001),
+                    )
+                    print()
+            if expected:
+                print(f"Verifying {label}", flush=True)
+                if sha256(partial) != expected.lower():
+                    partial.unlink(missing_ok=True)
+                    raise BootstrapError(f"checksum mismatch for {destination.name}")
             partial.replace(destination)
             return "downloaded"
         except BootstrapError:
             raise
         except (OSError, urllib.error.URLError) as error:
+            if sys.stdout.isatty():
+                print()
             last_error = error
             if attempt + 1 < retries:
                 time.sleep(2**attempt)
@@ -891,7 +956,7 @@ def sync_workflow(args, manifest):
         try:
             relative = safe_relative_path(asset["path"], f"asset {name} path")
             destination = confined_path(comfyui, relative, f"asset {name} path")
-            result = download(asset, destination, args.retries)
+            result = download(asset, destination, args.retries, name)
             results[result] += 1
             print(f"{result.capitalize():10} {name} -> {relative}")
         except (BootstrapError, KeyError, TypeError) as error:

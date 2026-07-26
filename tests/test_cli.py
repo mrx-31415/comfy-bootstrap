@@ -186,6 +186,7 @@ if "deps-in-workflow" in sys.argv:
         )
 
         first = self.run_cli("sync", "example")
+        self.assertIn("Downloading model", first.stdout)
         self.assertIn("1 downloaded", first.stdout)
         installed = self.comfyui / "models/unet/model.bin"
         self.assertEqual(installed.read_bytes(), AssetHandler.content)
