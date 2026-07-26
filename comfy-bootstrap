@@ -51,6 +51,23 @@ def save_manifest(path, data):
     temporary.replace(path)
 
 
+def read_workflow(path):
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as error:
+        raise BootstrapError(f"workflow file is not valid JSON: {error}") from error
+    if (
+        not isinstance(data, dict)
+        or not isinstance(data.get("nodes"), list)
+        or not isinstance(data.get("links"), list)
+    ):
+        raise BootstrapError(
+            "workflow must be ComfyUI UI-format JSON with nodes and links arrays; "
+            "API-format prompt JSON has no editable canvas"
+        )
+    return data
+
+
 def safe_relative_path(value, label="path"):
     path = Path(value)
     if not value or path.is_absolute() or ".." in path.parts:
@@ -326,6 +343,7 @@ def workflow_source(manifest_path, workflow):
     source = manifest_path.parent / safe_relative_path(value, "workflow file")
     if not source.is_file():
         raise BootstrapError(f"workflow file does not exist: {source}")
+    read_workflow(source)
     return source
 
 
@@ -585,10 +603,7 @@ def add_workflow(args, manifest):
         raise BootstrapError("workflow file must be inside the manifest directory") from error
     if not source.is_file():
         raise BootstrapError(f"workflow file does not exist: {args.file}")
-    try:
-        json.loads(source.read_text())
-    except (OSError, json.JSONDecodeError) as error:
-        raise BootstrapError(f"workflow file is not valid JSON: {error}") from error
+    read_workflow(source)
     if name in manifest["workflows"] and not args.replace:
         raise BootstrapError(f"workflow already exists: {name} (use --replace)")
     existing_assets = manifest["workflows"].get(name, {}).get("assets", [])
@@ -630,9 +645,9 @@ def import_workflow(args, manifest):
         raise BootstrapError(f"workflow file does not exist: {args.file}")
     try:
         text = source.read_text()
-        workflow_data = json.loads(text)
-    except (OSError, json.JSONDecodeError) as error:
-        raise BootstrapError(f"workflow file is not valid JSON: {error}") from error
+        workflow_data = read_workflow(source)
+    except OSError as error:
+        raise BootstrapError(f"cannot read workflow file: {error}") from error
     if name in manifest["workflows"] and not args.replace:
         raise BootstrapError(f"workflow already exists: {name} (use --replace)")
 

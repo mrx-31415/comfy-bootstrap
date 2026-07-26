@@ -15,6 +15,30 @@ ROOT = Path(__file__).resolve().parents[1]
 CLI = ROOT / "comfy-bootstrap"
 
 
+class BundledWorkflowTest(unittest.TestCase):
+    def test_krea_workflow_has_an_editable_connected_canvas(self):
+        workflow = json.loads(
+            (ROOT / "workflows/krea2-text2img-turbo-bypass.json").read_text()
+        )
+        nodes = {node["id"]: node for node in workflow["nodes"]}
+
+        self.assertEqual(workflow["version"], 0.4)
+        self.assertEqual(len(nodes), 12)
+        self.assertEqual(len(workflow["links"]), 15)
+        self.assertEqual(
+            nodes[6]["widgets_values"],
+            [
+                "A cinematic portrait of a woman in soft natural light, "
+                "warm expression, shallow depth of field."
+            ],
+        )
+        for link_id, source, source_slot, target, target_slot, _type in workflow[
+            "links"
+        ]:
+            self.assertIn(link_id, nodes[source]["outputs"][source_slot]["links"])
+            self.assertEqual(nodes[target]["inputs"][target_slot]["link"], link_id)
+
+
 class AssetHandler(BaseHTTPRequestHandler):
     content = b"model-data-" * 1024
     ranges = []
@@ -79,7 +103,7 @@ class CLITest(unittest.TestCase):
         self.comfyui.mkdir()
         self.workflow = self.base / "workflows" / "example.json"
         self.workflow.parent.mkdir()
-        self.workflow.write_text('{"last_node_id": 1}\n')
+        self.workflow.write_text('{"nodes": [], "links": []}\n')
         AssetHandler.ranges = []
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), AssetHandler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
@@ -240,6 +264,16 @@ elif "simple-show" in sys.argv and nodes_marker.exists():
         self.assertIn("safe relative path", result.stderr)
         self.assertFalse(self.manifest.exists())
 
+    def test_rejects_api_format_workflow(self):
+        api_workflow = self.base / "api.json"
+        api_workflow.write_text('{"1": {"class_type": "SaveImage"}}')
+
+        result = self.run_cli(
+            "workflow", "add", "api", str(api_workflow), expected=1
+        )
+
+        self.assertIn("API-format prompt JSON has no editable canvas", result.stderr)
+
     def test_sync_rejects_symlink_escape(self):
         outside = self.base / "outside"
         outside.mkdir()
@@ -273,7 +307,8 @@ elif "simple-show" in sys.argv and nodes_marker.exists():
                                 "missing-vae.safetensors",
                             ],
                         }
-                    ]
+                    ],
+                    "links": [],
                 }
             )
         )

@@ -1,193 +1,405 @@
 {
-  "6": {
-    "inputs": {
-      "text": "A cinematic portrait of a woman in soft natural light, warm expression, shallow depth of field.",
-      "clip": [
-        "317",
-        0
-      ]
-    },
-    "class_type": "CLIPTextEncode",
-    "_meta": {
-      "title": "CLIP Text Encode (Prompt)"
-    }
-  },
-  "8": {
-    "inputs": {
-      "samples": [
-        "274",
-        0
+  "id": "c171e6d8-6b55-4cc8-9b12-244156a794d4",
+  "revision": 0,
+  "last_node_id": 322,
+  "last_link_id": 15,
+  "nodes": [
+    {
+      "id": 316,
+      "type": "UnetLoaderGGUF",
+      "pos": [0, 0],
+      "size": [320, 80],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "unet_name",
+          "type": "COMBO",
+          "widget": {"name": "unet_name"},
+          "link": null
+        }
       ],
-      "vae": [
-        "210",
-        0
-      ]
-    },
-    "class_type": "VAEDecode",
-    "_meta": {
-      "title": "VAE Decode"
-    }
-  },
-  "210": {
-    "inputs": {
-      "vae_name": "Wan2_1_VAE_fp32.safetensors"
-    },
-    "class_type": "VAELoader",
-    "_meta": {
-      "title": "Load VAE"
-    }
-  },
-  "213": {
-    "inputs": {
-      "filename_prefix": "krea2-text2img",
-      "images": [
-        "8",
-        0
-      ]
-    },
-    "class_type": "SaveImage",
-    "_meta": {
-      "title": "Save Image"
-    }
-  },
-  "231": {
-    "inputs": {
-      "width": 1200,
-      "height": 1600,
-      "batch_size": 1
-    },
-    "class_type": "EmptyLatentImage",
-    "_meta": {
-      "title": "Empty Latent Image"
-    }
-  },
-  "265": {
-    "inputs": {
-      "eta": 0.5,
-      "sampler_name": "exponential/res_2s",
-      "scheduler": "beta",
-      "steps": 6,
-      "steps_to_run": -1,
-      "denoise": 1,
-      "cfg": 1,
-      "seed": 42,
-      "sampler_mode": "standard",
-      "bongmath": true,
-      "model": [
-        "322",
-        0
+      "outputs": [
+        {"name": "MODEL", "type": "MODEL", "links": [1]}
       ],
-      "positive": [
-        "6",
-        0
+      "properties": {
+        "cnr_id": "comfyui-gguf",
+        "aux_id": "city96/ComfyUI-GGUF",
+        "Node name for S&R": "UnetLoaderGGUF"
+      },
+      "widgets_values": ["Krea-2-Base-Q5_K_M.gguf"]
+    },
+    {
+      "id": 315,
+      "type": "LoraLoaderModelOnly",
+      "title": "Turbo LoRA",
+      "pos": [370, 0],
+      "size": [320, 120],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {"name": "model", "type": "MODEL", "link": 1},
+        {
+          "name": "lora_name",
+          "type": "COMBO",
+          "widget": {"name": "lora_name"},
+          "link": null
+        },
+        {
+          "name": "strength_model",
+          "type": "FLOAT",
+          "widget": {"name": "strength_model"},
+          "link": null
+        }
       ],
-      "negative": [
-        "272",
-        0
+      "outputs": [
+        {"name": "MODEL", "type": "MODEL", "links": [2]}
       ],
-      "latent_image": [
-        "231",
-        0
+      "properties": {"Node name for S&R": "LoraLoaderModelOnly"},
+      "widgets_values": ["krea2_turbo_lora_rank_64_bf16.safetensors", 0.6]
+    },
+    {
+      "id": 322,
+      "type": "LoraLoaderModelOnly",
+      "title": "Filter Bypass LoRA",
+      "pos": [740, 0],
+      "size": [320, 120],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {"name": "model", "type": "MODEL", "link": 2},
+        {
+          "name": "lora_name",
+          "type": "COMBO",
+          "widget": {"name": "lora_name"},
+          "link": null
+        },
+        {
+          "name": "strength_model",
+          "type": "FLOAT",
+          "widget": {"name": "strength_model"},
+          "link": null
+        }
+      ],
+      "outputs": [
+        {"name": "MODEL", "type": "MODEL", "links": [3, 4]}
+      ],
+      "properties": {"Node name for S&R": "LoraLoaderModelOnly"},
+      "widgets_values": ["krea2filterbypass.safetensors", 5]
+    },
+    {
+      "id": 317,
+      "type": "CLIPLoader",
+      "pos": [0, 180],
+      "size": [320, 140],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "clip_name",
+          "type": "COMBO",
+          "widget": {"name": "clip_name"},
+          "link": null
+        },
+        {
+          "name": "type",
+          "type": "COMBO",
+          "widget": {"name": "type"},
+          "link": null
+        },
+        {
+          "name": "device",
+          "type": "COMBO",
+          "widget": {"name": "device"},
+          "link": null
+        }
+      ],
+      "outputs": [
+        {"name": "CLIP", "type": "CLIP", "links": [5, 6]}
+      ],
+      "properties": {"Node name for S&R": "CLIPLoader"},
+      "widgets_values": ["qwen3vl_4b_bf16.safetensors", "krea2", "cpu"]
+    },
+    {
+      "id": 6,
+      "type": "CLIPTextEncode",
+      "title": "Positive Prompt",
+      "pos": [370, 180],
+      "size": [430, 190],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {"name": "clip", "type": "CLIP", "link": 5},
+        {
+          "name": "text",
+          "type": "STRING",
+          "widget": {"name": "text"},
+          "link": null
+        }
+      ],
+      "outputs": [
+        {"name": "CONDITIONING", "type": "CONDITIONING", "links": [7, 8]}
+      ],
+      "properties": {"Node name for S&R": "CLIPTextEncode"},
+      "widgets_values": [
+        "A cinematic portrait of a woman in soft natural light, warm expression, shallow depth of field."
       ]
     },
-    "class_type": "ClownsharKSampler_Beta",
-    "_meta": {
-      "title": "ClownsharKSampler"
-    }
-  },
-  "272": {
-    "inputs": {
-      "text": "",
-      "clip": [
-        "317",
-        0
-      ]
-    },
-    "class_type": "CLIPTextEncode",
-    "_meta": {
-      "title": "CLIP Text Encode (Prompt)"
-    }
-  },
-  "274": {
-    "inputs": {
-      "eta": 0.5,
-      "sampler_name": "multistep/deis_3m",
-      "scheduler": "bong_tangent",
-      "steps": 2,
-      "steps_to_run": -1,
-      "denoise": 0.2,
-      "cfg": 1,
-      "seed": 42,
-      "sampler_mode": "standard",
-      "bongmath": true,
-      "model": [
-        "322",
-        0
+    {
+      "id": 272,
+      "type": "CLIPTextEncode",
+      "title": "Negative Prompt",
+      "pos": [370, 420],
+      "size": [430, 150],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [
+        {"name": "clip", "type": "CLIP", "link": 6},
+        {
+          "name": "text",
+          "type": "STRING",
+          "widget": {"name": "text"},
+          "link": null
+        }
       ],
-      "positive": [
-        "6",
-        0
+      "outputs": [
+        {"name": "CONDITIONING", "type": "CONDITIONING", "links": [9, 10]}
       ],
-      "negative": [
-        "272",
-        0
+      "properties": {"Node name for S&R": "CLIPTextEncode"},
+      "widgets_values": [""]
+    },
+    {
+      "id": 231,
+      "type": "EmptyLatentImage",
+      "pos": [0, 400],
+      "size": [320, 145],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "width",
+          "type": "INT",
+          "widget": {"name": "width"},
+          "link": null
+        },
+        {
+          "name": "height",
+          "type": "INT",
+          "widget": {"name": "height"},
+          "link": null
+        },
+        {
+          "name": "batch_size",
+          "type": "INT",
+          "widget": {"name": "batch_size"},
+          "link": null
+        }
       ],
-      "latent_image": [
-        "265",
-        0
+      "outputs": [
+        {"name": "LATENT", "type": "LATENT", "links": [11]}
+      ],
+      "properties": {"Node name for S&R": "EmptyLatentImage"},
+      "widgets_values": [1200, 1600, 1]
+    },
+    {
+      "id": 265,
+      "type": "ClownsharKSampler_Beta",
+      "title": "Primary Sampler",
+      "pos": [1110, 0],
+      "size": [320, 480],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [
+        {"name": "model", "type": "MODEL", "shape": 7, "link": 3},
+        {
+          "name": "positive",
+          "type": "CONDITIONING",
+          "shape": 7,
+          "link": 7
+        },
+        {
+          "name": "negative",
+          "type": "CONDITIONING",
+          "shape": 7,
+          "link": 9
+        },
+        {
+          "name": "latent_image",
+          "type": "LATENT",
+          "shape": 7,
+          "link": 11
+        },
+        {"name": "sigmas", "type": "SIGMAS", "shape": 7, "link": null},
+        {"name": "guides", "type": "GUIDES", "shape": 7, "link": null},
+        {"name": "options", "type": "OPTIONS", "shape": 7, "link": null}
+      ],
+      "outputs": [
+        {"name": "output", "type": "LATENT", "links": [12], "slot_index": 0},
+        {"name": "denoised", "type": "LATENT", "links": null},
+        {"name": "options", "type": "OPTIONS", "links": null}
+      ],
+      "properties": {
+        "cnr_id": "RES4LYF",
+        "Node name for S&R": "ClownsharKSampler_Beta"
+      },
+      "widgets_values": [
+        0.5,
+        "exponential/res_2s",
+        "beta",
+        6,
+        -1,
+        1,
+        1,
+        42,
+        "fixed",
+        "standard",
+        true
       ]
     },
-    "class_type": "ClownsharKSampler_Beta",
-    "_meta": {
-      "title": "ClownsharKSampler"
-    }
-  },
-  "315": {
-    "inputs": {
-      "lora_name": "krea2_turbo_lora_rank_64_bf16.safetensors",
-      "strength_model": 0.6,
-      "model": [
-        "316",
-        0
+    {
+      "id": 274,
+      "type": "ClownsharKSampler_Beta",
+      "title": "Refinement Sampler",
+      "pos": [1490, 0],
+      "size": [320, 480],
+      "flags": {},
+      "order": 9,
+      "mode": 0,
+      "inputs": [
+        {"name": "model", "type": "MODEL", "shape": 7, "link": 4},
+        {
+          "name": "positive",
+          "type": "CONDITIONING",
+          "shape": 7,
+          "link": 8
+        },
+        {
+          "name": "negative",
+          "type": "CONDITIONING",
+          "shape": 7,
+          "link": 10
+        },
+        {
+          "name": "latent_image",
+          "type": "LATENT",
+          "shape": 7,
+          "link": 12
+        },
+        {"name": "sigmas", "type": "SIGMAS", "shape": 7, "link": null},
+        {"name": "guides", "type": "GUIDES", "shape": 7, "link": null},
+        {"name": "options", "type": "OPTIONS", "shape": 7, "link": null}
+      ],
+      "outputs": [
+        {"name": "output", "type": "LATENT", "links": [13], "slot_index": 0},
+        {"name": "denoised", "type": "LATENT", "links": null},
+        {"name": "options", "type": "OPTIONS", "links": null}
+      ],
+      "properties": {
+        "cnr_id": "RES4LYF",
+        "Node name for S&R": "ClownsharKSampler_Beta"
+      },
+      "widgets_values": [
+        0.5,
+        "multistep/deis_3m",
+        "bong_tangent",
+        2,
+        -1,
+        0.2,
+        1,
+        42,
+        "fixed",
+        "standard",
+        true
       ]
     },
-    "class_type": "LoraLoaderModelOnly",
-    "_meta": {
-      "title": "Turbo LoRA (0.6)"
+    {
+      "id": 210,
+      "type": "VAELoader",
+      "pos": [1490, 540],
+      "size": [320, 80],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "vae_name",
+          "type": "COMBO",
+          "widget": {"name": "vae_name"},
+          "link": null
+        }
+      ],
+      "outputs": [
+        {"name": "VAE", "type": "VAE", "links": [14]}
+      ],
+      "properties": {"Node name for S&R": "VAELoader"},
+      "widgets_values": ["Wan2_1_VAE_fp32.safetensors"]
+    },
+    {
+      "id": 8,
+      "type": "VAEDecode",
+      "pos": [1870, 0],
+      "size": [240, 90],
+      "flags": {},
+      "order": 10,
+      "mode": 0,
+      "inputs": [
+        {"name": "samples", "type": "LATENT", "link": 13},
+        {"name": "vae", "type": "VAE", "link": 14}
+      ],
+      "outputs": [
+        {"name": "IMAGE", "type": "IMAGE", "links": [15]}
+      ],
+      "properties": {"Node name for S&R": "VAEDecode"},
+      "widgets_values": []
+    },
+    {
+      "id": 213,
+      "type": "SaveImage",
+      "pos": [2170, 0],
+      "size": [320, 420],
+      "flags": {},
+      "order": 11,
+      "mode": 0,
+      "inputs": [
+        {"name": "images", "type": "IMAGE", "link": 15}
+      ],
+      "outputs": [],
+      "properties": {"Node name for S&R": "SaveImage"},
+      "widgets_values": ["krea2-text2img"]
+    }
+  ],
+  "links": [
+    [1, 316, 0, 315, 0, "MODEL"],
+    [2, 315, 0, 322, 0, "MODEL"],
+    [3, 322, 0, 265, 0, "MODEL"],
+    [4, 322, 0, 274, 0, "MODEL"],
+    [5, 317, 0, 6, 0, "CLIP"],
+    [6, 317, 0, 272, 0, "CLIP"],
+    [7, 6, 0, 265, 1, "CONDITIONING"],
+    [8, 6, 0, 274, 1, "CONDITIONING"],
+    [9, 272, 0, 265, 2, "CONDITIONING"],
+    [10, 272, 0, 274, 2, "CONDITIONING"],
+    [11, 231, 0, 265, 3, "LATENT"],
+    [12, 265, 0, 274, 3, "LATENT"],
+    [13, 274, 0, 8, 0, "LATENT"],
+    [14, 210, 0, 8, 1, "VAE"],
+    [15, 8, 0, 213, 0, "IMAGE"]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 0.75,
+      "offset": [70, 180]
     }
   },
-  "316": {
-    "inputs": {
-      "unet_name": "Krea-2-Base-Q5_K_M.gguf"
-    },
-    "class_type": "UnetLoaderGGUF",
-    "_meta": {
-      "title": "Krea 2 RAW GGUF"
-    }
-  },
-  "317": {
-    "inputs": {
-      "clip_name": "qwen3vl_4b_bf16.safetensors",
-      "type": "krea2",
-      "device": "cpu"
-    },
-    "class_type": "CLIPLoader",
-    "_meta": {
-      "title": "Load CLIP"
-    }
-  },
-  "322": {
-    "inputs": {
-      "lora_name": "krea2filterbypass.safetensors",
-      "strength_model": 5,
-      "model": [
-        "315",
-        0
-      ]
-    },
-    "class_type": "LoraLoaderModelOnly",
-    "_meta": {
-      "title": "Filter Bypass LoRA (1.0)"
-    }
-  }
+  "version": 0.4
 }

@@ -3,6 +3,10 @@
 Download the files required by a ComfyUI workflow and put them in the right
 directories. ComfyUI itself must already be installed.
 
+Workflow files must be the editable UI-format JSON saved from ComfyUI, with
+`nodes` and `links` arrays, not API-format prompt JSON intended for direct
+queue submission.
+
 Asset and workflow management has no dependencies beyond Python 3.9 or newer.
 Optional custom-node support uses a pinned `comfy-cli` and requires Python
 3.10 or newer.
