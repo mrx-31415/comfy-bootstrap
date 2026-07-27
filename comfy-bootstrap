@@ -406,6 +406,34 @@ def node_show(args, manifest):
     print(json.dumps(data, indent=2, sort_keys=True))
 
 
+def custom_node_directory(comfyui, url):
+    name = Path(urllib.parse.urlparse(url).path.rstrip("/")).name.removesuffix(".git")
+    if not name:
+        raise BootstrapError(f"custom node URL has no repository name: {url}")
+    return comfyui / "custom_nodes" / name
+
+
+def install_node_requirements(custom_nodes, state, comfyui):
+    configured = state.get("python")
+    python = (
+        Path(configured)
+        if state.get("comfyui_dir") == str(comfyui)
+        and isinstance(configured, str)
+        and Path(configured).is_file()
+        else python_interpreter(None, comfyui)
+    )
+    if python is None:
+        raise BootstrapError("cannot find ComfyUI's Python; run comfy-bootstrap setup")
+    for url in custom_nodes:
+        requirements = custom_node_directory(comfyui, url) / "requirements.txt"
+        if requirements.is_file():
+            run_command(
+                [str(python), "-m", "pip", "install", "-r", str(requirements)],
+                requirements.parent,
+                f"installing requirements for {requirements.parent.name}",
+            )
+
+
 def install_nodes(args, workflow, comfyui):
     value = workflow.get("node_dependencies")
     if not value or args.skip_nodes:
@@ -415,7 +443,7 @@ def install_nodes(args, workflow, comfyui):
     )
     if not dependencies.is_file():
         raise BootstrapError(f"node dependency file does not exist: {dependencies}")
-    fingerprint = sha256(dependencies)
+    fingerprint = f"requirements-v1:{sha256(dependencies)}"
     cache_key = f"{comfyui}\n{value}"
     state = load_state(args.manifest)
     node_cache = state.get("node_dependencies")
@@ -425,16 +453,16 @@ def install_nodes(args, workflow, comfyui):
         print(f"Custom nodes already installed ({dependencies.name} unchanged)")
         return
 
+    try:
+        data = json.loads(dependencies.read_text())
+        custom_nodes = data.get("custom_nodes", {})
+        if not isinstance(custom_nodes, dict):
+            raise ValueError("custom_nodes must be an object")
+    except (OSError, json.JSONDecodeError, ValueError) as error:
+        raise BootstrapError(f"invalid node dependency file: {error}") from error
+
     comfy = configured_comfy(args.manifest, comfyui)
     if not args.force_nodes:
-        try:
-            data = json.loads(dependencies.read_text())
-            custom_nodes = data.get("custom_nodes", {})
-            if not isinstance(custom_nodes, dict):
-                raise ValueError("custom_nodes must be an object")
-        except (OSError, json.JSONDecodeError, ValueError) as error:
-            raise BootstrapError(f"invalid node dependency file: {error}") from error
-
         wanted = {
             re.sub(
                 r"[^a-z0-9]",
@@ -462,6 +490,7 @@ def install_nodes(args, workflow, comfyui):
             for line in installed_output.splitlines()
         }
         if wanted and wanted <= installed:
+            install_node_requirements(custom_nodes, state, comfyui)
             node_cache[cache_key] = fingerprint
             state["node_dependencies"] = node_cache
             save_state(args.manifest, state)
@@ -469,21 +498,37 @@ def install_nodes(args, workflow, comfyui):
             return
 
     print(f"Installing custom nodes from {dependencies.name}", flush=True)
-    run_command(
-        [
-            str(comfy),
-            "--here",
-            "--skip-prompt",
-            "node",
-            "install-deps",
-            "--deps",
-            str(dependencies),
-            "--mode",
-            "remote",
-        ],
-        comfyui,
-        "installing custom nodes",
-    )
+    try:
+        run_command(
+            [
+                str(comfy),
+                "--here",
+                "--skip-prompt",
+                "node",
+                "install-deps",
+                "--deps",
+                str(dependencies),
+                "--mode",
+                "remote",
+            ],
+            comfyui,
+            "installing custom nodes",
+        )
+    except BootstrapError:
+        if not custom_nodes:
+            raise
+        print("ComfyUI-Manager install failed; falling back to git", flush=True)
+    custom_nodes_dir = comfyui / "custom_nodes"
+    custom_nodes_dir.mkdir(parents=True, exist_ok=True)
+    for url in custom_nodes:
+        destination = custom_node_directory(comfyui, url)
+        if not destination.is_dir():
+            run_command(
+                ["git", "clone", "--recursive", url, str(destination)],
+                custom_nodes_dir,
+                f"cloning {destination.name}",
+            )
+    install_node_requirements(custom_nodes, state, comfyui)
     node_cache[cache_key] = fingerprint
     state["node_dependencies"] = node_cache
     save_state(args.manifest, state)

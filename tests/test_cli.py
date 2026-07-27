@@ -231,6 +231,7 @@ import sys
 
 log = pathlib.Path({str(log)!r})
 nodes_marker = pathlib.Path({str(nodes_marker)!r})
+failure_marker = pathlib.Path({str(tools / ".install-deps-fails")!r})
 with log.open("a") as stream:
     stream.write(json.dumps(["comfy", *sys.argv[1:]]) + "\\n")
 if "deps-in-workflow" in sys.argv:
@@ -245,6 +246,11 @@ if "deps-in-workflow" in sys.argv:
         "unknown_nodes": []
     }}))
 elif "install-deps" in sys.argv:
+    node = pathlib.Path({str(self.comfyui / "custom_nodes/ComfyUI-GGUF")!r})
+    node.mkdir(parents=True, exist_ok=True)
+    (node / "requirements.txt").write_text("example-dependency\\n")
+    if failure_marker.exists():
+        raise SystemExit(1)
     nodes_marker.touch()
 elif "simple-show" in sys.argv and nodes_marker.exists():
     print("ComfyUI-GGUF@2.0.0")
@@ -474,6 +480,14 @@ elif "simple-show" in sys.argv and nodes_marker.exists():
         ]
         self.assertEqual(len(install_calls), 1)
         self.assertIn("--here", install_calls[0])
+        calls = [json.loads(line) for line in log.read_text().splitlines()]
+        self.assertTrue(
+            any(
+                call[:4] == ["python", "-m", "pip", "install"]
+                and "custom_nodes/ComfyUI-GGUF/requirements.txt" in call[-1]
+                for call in calls
+            )
+        )
 
         repeated_sync = self.run_cli("sync", "example")
         self.assertIn("already installed", repeated_sync.stdout)
@@ -494,7 +508,9 @@ elif "simple-show" in sys.argv and nodes_marker.exists():
             len([call for call in calls if "install-deps" in call]), 1
         )
 
-        self.run_cli("sync", "example", "--force-nodes")
+        (fake_python.parent / ".install-deps-fails").touch()
+        forced = self.run_cli("sync", "example", "--force-nodes")
+        self.assertIn("falling back to git", forced.stdout)
         calls = [json.loads(line) for line in log.read_text().splitlines()]
         self.assertEqual(
             len([call for call in calls if "install-deps" in call]), 2

@@ -69,7 +69,8 @@ separately. Interactive terminals show a progress bar with size and download
 speed; interrupted `.part` files resume automatically.
 
 Successful custom-node installs are cached by dependency-spec checksum.
-`sync` also detects nodes installed before the cache existed. Use
+`sync` also detects nodes installed before the cache existed and installs each
+node's `requirements.txt` with ComfyUI's configured Python. Use
 `--force-nodes` to reinstall them explicitly.
 
 ## Import an existing workflow
