@@ -4,29 +4,34 @@
       "path": "models/diffusion_models/Krea-2-Base-Q5_K_M.gguf",
       "url": "https://huggingface.co/realrebelai/KREA-2_GGUFs/resolve/main/BASE/Krea-2-Base-Q5_K_M.gguf"
     },
-    "krea2_turbo_lora_rank_64_bf16": {
-      "path": "models/loras/krea2_turbo_lora_rank_64_bf16.safetensors",
-      "sha256": "db8c5bae0a415d448da9d842111d6e51f7d32e47143a3118eb267e5c4773de87",
-      "url": "https://huggingface.co/Comfy-Org/Krea-2/resolve/main/loras/krea2_turbo_lora_rank_64_bf16.safetensors"
-    },
     "krea2_turbo_bf16": {
       "path": "models/diffusion_models/krea2_turbo_bf16.safetensors",
       "sha256": "78bbf8f4165eda19cea3cb06c78089221932a39e2eed8af9da741f942c47ffb3",
       "url": "https://huggingface.co/Comfy-Org/Krea-2/resolve/main/diffusion_models/krea2_turbo_bf16.safetensors"
+    },
+    "krea2_turbo_fp8_scaled": {
+      "path": "models/diffusion_models/krea2_turbo_fp8_scaled.safetensors",
+      "sha256": "eb4dd8c612cfd10f64f25b057e6e6bbcb5737c94a7372177e456dbf7579502f1",
+      "url": "https://huggingface.co/Comfy-Org/Krea-2/resolve/main/diffusion_models/krea2_turbo_fp8_scaled.safetensors"
+    },
+    "krea2_turbo_lora_rank_64_bf16": {
+      "path": "models/loras/krea2_turbo_lora_rank_64_bf16.safetensors",
+      "sha256": "db8c5bae0a415d448da9d842111d6e51f7d32e47143a3118eb267e5c4773de87",
+      "url": "https://huggingface.co/Comfy-Org/Krea-2/resolve/main/loras/krea2_turbo_lora_rank_64_bf16.safetensors"
     },
     "krea2filterbypass": {
       "path": "models/loras/krea2filterbypass.safetensors",
       "sha256": "ac6114d7112ae2397eb26b9e6e9623aad059d346fc285ea050ffb042c7c6748e",
       "url": "https://huggingface.co/Kutches/Kr3a/resolve/main/krea2filterbypass.safetensors"
     },
-    "qwen3vl_4b_fp8_scaled": {
-      "path": "models/text_encoders/qwen3vl_4b_fp8_scaled.safetensors",
-      "url": "https://huggingface.co/Comfy-Org/Qwen3-VL/resolve/main/text_encoders/qwen3vl_4b_fp8_scaled.safetensors"
-    },
     "qwen3vl_4b_bf16": {
       "path": "models/text_encoders/qwen3vl_4b_bf16.safetensors",
       "sha256": "36f3ff447ef59201722e8f9ce6020c9819fdcfba6aa2608c4e09b1c0ce114e34",
       "url": "https://huggingface.co/Comfy-Org/Krea-2/resolve/main/text_encoders/qwen3vl_4b_bf16.safetensors"
+    },
+    "qwen3vl_4b_fp8_scaled": {
+      "path": "models/text_encoders/qwen3vl_4b_fp8_scaled.safetensors",
+      "url": "https://huggingface.co/Comfy-Org/Qwen3-VL/resolve/main/text_encoders/qwen3vl_4b_fp8_scaled.safetensors"
     },
     "qwen_image_vae": {
       "path": "models/vae/qwen_image_vae.safetensors",
@@ -53,6 +58,14 @@
         "qwen_image_vae"
       ],
       "file": "workflows/krea2-turbo-bf16.json"
+    },
+    "krea2-turbo-fp8": {
+      "assets": [
+        "krea2_turbo_fp8_scaled",
+        "qwen3vl_4b_fp8_scaled",
+        "qwen_image_vae"
+      ],
+      "file": "workflows/krea2-turbo-fp8.json"
     }
   }
 }
