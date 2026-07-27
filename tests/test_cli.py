@@ -474,6 +474,8 @@ elif "simple-show" in sys.argv and nodes_marker.exists():
 
         synced = self.run_cli("sync", "example")
         self.assertIn("Installing custom nodes", synced.stdout)
+        self.assertIn("Installing custom nodes done", synced.stdout)
+        self.assertIn("Installing requirements for ComfyUI-GGUF done", synced.stdout)
         calls = [json.loads(line) for line in log.read_text().splitlines()]
         install_calls = [
             call for call in calls if "install-deps" in call

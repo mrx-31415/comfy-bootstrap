@@ -149,12 +149,32 @@ def command_output(command, label, cwd=None):
 
 
 def run_command(command, cwd, label):
+    started = time.monotonic()
+    display = label[:1].upper() + label[1:]
+    print(f"{display}...", flush=True)
     try:
-        result = subprocess.run(command, cwd=cwd)
+        process = subprocess.Popen(command, cwd=cwd)
     except OSError as error:
         raise BootstrapError(f"{label} failed: {error}") from error
-    if result.returncode:
-        raise BootstrapError(f"{label} failed with exit code {result.returncode}")
+    frame = 0
+    spinner = "|/-\\"
+    updated = started
+    while process.poll() is None:
+        now = time.monotonic()
+        elapsed = int(now - started)
+        if sys.stdout.isatty():
+            print(f"\r  {spinner[frame % 4]} {elapsed}s", end="", flush=True)
+            frame += 1
+        elif now - updated >= 30:
+            print(f"{display} still running ({elapsed}s)", flush=True)
+            updated = now
+        time.sleep(0.2)
+    elapsed = int(time.monotonic() - started)
+    if sys.stdout.isatty():
+        print("\r", end="")
+    if process.returncode:
+        raise BootstrapError(f"{label} failed with exit code {process.returncode}")
+    print(f"{display} done ({elapsed}s)", flush=True)
 
 
 def python_interpreter(explicit, comfyui):
