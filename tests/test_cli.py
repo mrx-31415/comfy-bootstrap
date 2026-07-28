@@ -75,7 +75,25 @@ class BundledWorkflowTest(unittest.TestCase):
         )
         self.assertEqual(
             set(dependencies["custom_nodes"]),
-            {"https://github.com/RealRebelAI/ComfyUI-GGUF_KREA-2"},
+            {
+                "https://github.com/RealRebelAI/ComfyUI-GGUF_KREA-2",
+                "https://github.com/SeanBRVFX/ComfyUI-CorridorKey",
+            },
+        )
+        manifest = json.loads((ROOT / "comfy-bootstrap.json").read_text())
+        self.assertIn(
+            "corridorkey",
+            manifest["workflows"]["krea2-text2img-turbo-bypass"]["assets"],
+        )
+        self.assertEqual(
+            manifest["assets"]["corridorkey"],
+            {
+                "path": "custom_nodes/ComfyUI-CorridorKey/models/CorridorKey.pth",
+                "url": (
+                    "https://huggingface.co/nikopueringer/CorridorKey_v1.0/"
+                    "resolve/main/CorridorKey_v1.0.pth"
+                ),
+            },
         )
 
 

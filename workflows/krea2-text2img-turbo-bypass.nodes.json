@@ -3,6 +3,10 @@
     "https://github.com/RealRebelAI/ComfyUI-GGUF_KREA-2": {
       "state": "not-installed",
       "hash": "-"
+    },
+    "https://github.com/SeanBRVFX/ComfyUI-CorridorKey": {
+      "state": "not-installed",
+      "hash": "-"
     }
   },
   "unknown_nodes": []
