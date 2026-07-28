@@ -4,6 +4,10 @@
       "path": "custom_nodes/ComfyUI-CorridorKey/models/CorridorKey.pth",
       "url": "https://huggingface.co/nikopueringer/CorridorKey_v1.0/resolve/main/CorridorKey_v1.0.pth"
     },
+    "corridorkey-blue": {
+      "path": "custom_nodes/ComfyUI-CorridorKey/models/CorridorKeyBlue_1.0.pth",
+      "url": "https://huggingface.co/nikopueringer/CorridorKeyBlue_1.0/resolve/main/CorridorKeyBlue_1.0.pth"
+    },
     "krea-2-base-q5_k_m": {
       "path": "models/diffusion_models/Krea-2-Base-Q5_K_M.gguf",
       "url": "https://huggingface.co/realrebelai/KREA-2_GGUFs/resolve/main/BASE/Krea-2-Base-Q5_K_M.gguf"
@@ -51,7 +55,8 @@
         "qwen3vl_4b_fp8_scaled",
         "qwen_image_vae",
         "krea2filterbypass",
-        "corridorkey"
+        "corridorkey",
+        "corridorkey-blue"
       ],
       "file": "workflows/krea2-text2img-turbo-bypass.json",
       "node_dependencies": "workflows/krea2-text2img-turbo-bypass.nodes.json"

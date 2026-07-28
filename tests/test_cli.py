@@ -95,6 +95,23 @@ class BundledWorkflowTest(unittest.TestCase):
                 ),
             },
         )
+        self.assertEqual(
+            manifest["assets"]["corridorkey-blue"],
+            {
+                "path": (
+                    "custom_nodes/ComfyUI-CorridorKey/models/"
+                    "CorridorKeyBlue_1.0.pth"
+                ),
+                "url": (
+                    "https://huggingface.co/nikopueringer/CorridorKeyBlue_1.0/"
+                    "resolve/main/CorridorKeyBlue_1.0.pth"
+                ),
+            },
+        )
+        self.assertIn(
+            "corridorkey-blue",
+            manifest["workflows"]["krea2-text2img-turbo-bypass"]["assets"],
+        )
 
 
 class AssetHandler(BaseHTTPRequestHandler):
