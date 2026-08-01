@@ -41,6 +41,26 @@
       "path": "models/text_encoders/qwen3vl_4b_fp8_scaled.safetensors",
       "url": "https://huggingface.co/Comfy-Org/Qwen3-VL/resolve/main/text_encoders/qwen3vl_4b_fp8_scaled.safetensors"
     },
+    "qwen_2_5_vl_7b_fp8_scaled": {
+      "path": "models/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors",
+      "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors"
+    },
+    "qwen_image_2512_fp8_e4m3fn": {
+      "path": "models/diffusion_models/qwen_image_2512_fp8_e4m3fn.safetensors",
+      "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/diffusion_models/qwen_image_2512_fp8_e4m3fn.safetensors"
+    },
+    "qwen_image_2512_lightning_4step": {
+      "path": "models/loras/Qwen-Image-2512-Lightning-4steps-V1.0-fp32.safetensors",
+      "url": "https://huggingface.co/lightx2v/Qwen-Image-2512-Lightning/resolve/main/Qwen-Image-2512-Lightning-4steps-V1.0-fp32.safetensors"
+    },
+    "qwen_image_edit_2511_int8_convrot": {
+      "path": "models/diffusion_models/qwen_image_edit_2511_int8_convrot.safetensors",
+      "url": "https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/main/split_files/diffusion_models/qwen_image_edit_2511_int8_convrot.safetensors"
+    },
+    "qwen_image_edit_2511_lightning_4step": {
+      "path": "models/loras/Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors",
+      "url": "https://huggingface.co/lightx2v/Qwen-Image-Edit-2511-Lightning/resolve/main/Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors"
+    },
     "qwen_image_vae": {
       "path": "models/vae/qwen_image_vae.safetensors",
       "sha256": "a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f",
@@ -76,6 +96,33 @@
         "qwen_image_vae"
       ],
       "file": "workflows/krea2-turbo-fp8.json"
+    },
+    "krea2-turbo-fp8-filter-bypass": {
+      "assets": [
+        "krea2_turbo_fp8_scaled",
+        "qwen3vl_4b_fp8_scaled",
+        "qwen_image_vae",
+        "krea2filterbypass"
+      ],
+      "file": "workflows/krea2-turbo-fp8-filter-bypass.json"
+    },
+    "qwen-image-2512-text2img": {
+      "assets": [
+        "qwen_image_2512_fp8_e4m3fn",
+        "qwen_2_5_vl_7b_fp8_scaled",
+        "qwen_image_vae",
+        "qwen_image_2512_lightning_4step"
+      ],
+      "file": "workflows/qwen-image-2512-text2img.json"
+    },
+    "qwen-image-edit-2511-int8": {
+      "assets": [
+        "qwen_image_edit_2511_int8_convrot",
+        "qwen_2_5_vl_7b_fp8_scaled",
+        "qwen_image_vae",
+        "qwen_image_edit_2511_lightning_4step"
+      ],
+      "file": "workflows/qwen-image-edit-2511-int8.json"
     }
   }
 }
